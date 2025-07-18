@@ -40,6 +40,7 @@ sercalo_filter/
 │       ├── include/
 │       │   └── sercalo_i2c.h   # Interface do driver (funções e structs)
 │       └── sercalo_i2c.c       # Implementação do driver I2C
+├── interface/                  # Controle do dispositivo com GUI (veja interface/README.md)
 ├── _docs/
 │   ├── Datahseet Tunable Filter TF1-_-50-9N.pdf
 │   └── Manual Tunable Filter TF1-_-50-9N.pdf
