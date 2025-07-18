@@ -1,0 +1,72 @@
+# Arquivos e pastas do sistema operacional
+*.DS_Store
+Thumbs.db
+desktop.ini
+
+# Arquivos de backup e temporários de editores comuns
+*~
+*.swp
+*.swo
+*.bak
+*.tmp
+
+# Pasta de build do ESP-IDF
+/build/
+
+# Arquivos gerados pelo CMake (além da pasta de build, caso apareçam em outro lugar)
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+Makefile
+*.cbp
+*.depend
+*.layout
+*.mk
+
+# Configurações locais do ESP-IDF
+sdkconfig.old
+sdkconfig.rename
+# O arquivo 'sdkconfig' principal geralmente é versionado.
+
+# Arquivos de IDEs e Editores
+# Visual Studio Code (ignorar configurações locais/de usuário)
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json 
+# A linha acima ignora tudo em .vscode/, exceto settings.json, extensions.json, e launch.json (se você quiser versioná-los)
+# Se preferir ignorar tudo, use apenas:
+# .vscode/
+
+# Eclipse
+.project
+.cproject
+.settings/
+
+# Sublime Text
+*.sublime-workspace
+*.sublime-project
+
+# JetBrains (CLion, etc.)
+.idea/
+
+# Arquivos Python relacionados ao ambiente virtual (se usar um na raiz)
+venv/
+*.pyc
+__pycache__/
+.env
+
+# Arquivos do KiCAD
+*.kicad_prl
+*.lck
+*-backups
+
+# Documentos PDF ou outros arquivos de referência grandes que não são código fonte
+# (opcional, descomente se quiser ignorá-los)
+# *.pdf
+# *.png
+
+# Arquivos específicos do seu projeto que não devem ser versionados
+# Ex: credenciais, configurações locais específicas da máquina
+# my_local_settings.ini
