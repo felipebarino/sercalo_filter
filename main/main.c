@@ -1,8 +1,8 @@
 /**************************************************************************************************
 * Arquivo:      sercalo_i2c.c
 * Autor:        Felipe Oliveira Barino
-* Data:         2024-07-18
-* Versão:       0.1.1
+* Data:         2024-07-22
+* Versão:       1.0.0
 *
 * Descrição:    Implementação das funções de driver para comunicação I2C com o
 * Filtro Óptico Sintonizável Sercalo TF1.
@@ -18,6 +18,7 @@
 * [Data] - [Autor] - [Versão] - [Descrição da Modificação]
 * 2024-07-17 - Barino - 0.1.0 - Versão inicial (sem testes)
 * 2024-07-18 - Barino - 0.1.1 - Documentação e comentários
+* 2024-07-22 - Barino - 1.0.0 - Mínima versão funcional
 * 
 **************************************************************************************************/
 #include <stdio.h>
@@ -89,14 +90,18 @@ esp_err_t handle_get_interval(char *args, char *response_buf, size_t response_bu
 esp_err_t handle_get_wl(char *args, char *response_buf, size_t response_buf_len);
 esp_err_t handle_set_wl(char *args, char *response_buf, size_t response_buf_len);
 esp_err_t handle_sweep(char *args, char *response_buf, size_t response_buf_len);
+esp_err_t handle_powerup(char *args, char *response_buf, size_t response_buf_len);
+esp_err_t handle_get_power(char *args, char *response_buf, size_t response_buf_len);
 
 // Tabela de Comandos: adicionar novas linhas com comando e sua função.
 static const command_entry_t command_table[] = {
-    {"iden?", handle_get_iden},
+    {"iden", handle_get_iden},
     {"get-interval", handle_get_interval},
     {"get-wl", handle_get_wl},
     {"set-wl", handle_set_wl},
     {"sweep", handle_sweep},
+    {"powerup", handle_powerup},
+    {"get-power", handle_get_power},
 };
 // Calcula o número de comandos na tabela em tempo de compilação.
 static const int num_commands = sizeof(command_table) / sizeof(command_entry_t);
@@ -129,6 +134,45 @@ static void stop_sweep_if_active(filter_channel_t *channel) {
         channel->sweep_task_handle = NULL;
     }
 }
+
+/**
+ * @brief Garante que um canal de filtro esteja no modo de energia normal.
+ *
+ * Esta função de ajuda verifica o modo de energia atual do canal. Se estiver
+ * em baixo consumo (idle), ela envia o comando para ativar o modo normal
+ * e aguarda um tempo para a estabilização do dispositivo.
+ *
+ * @param channel Ponteiro para o canal de filtro a ser verificado e ativado.
+ * @return ESP_OK se o canal está ou foi colocado com sucesso em modo normal.
+ * @return ESP_FAIL se a comunicação ou ativação falhar.
+ */
+static esp_err_t ensure_power_on(filter_channel_t *channel) {
+    sercalo_power_mode_t current_mode;
+    esp_err_t ret;
+
+    // 1. Verifica o estado de energia atual.
+    ret = sercalo_get_set_power_mode(&channel->device_handle, NULL, &current_mode);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Falha ao obter o modo de energia para o canal %s", channel->name);
+        return ESP_FAIL;
+    }
+
+    // 2. Se estiver em modo de baixo consumo, ativa o modo normal.
+    if (current_mode == SERCALO_POWER_LOW) {
+        ESP_LOGI(TAG, "Canal %s está em modo de repouso. Ativando...", channel->name);
+        sercalo_power_mode_t power_on = SERCALO_POWER_NORMAL;
+        ret = sercalo_get_set_power_mode(&channel->device_handle, &power_on, NULL);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Falha ao ativar o modo de energia para o canal %s", channel->name);
+            return ESP_FAIL;
+        }
+        // Adiciona um delay para garantir que o dispositivo tenha tempo para estabilizar.
+        vTaskDelay(pdMS_TO_TICKS(100)); 
+    }
+
+    return ESP_OK;
+}
+
 
 // --- Tasks ---
 
@@ -293,6 +337,11 @@ esp_err_t handle_get_wl(char *args, char *response_buf, size_t response_buf_len)
     esp_err_t ret;
 
     if (xSemaphoreTake(g_command_mutex, portMAX_DELAY) == pdTRUE) {
+        ensure_power_on(channel); // Garante que o canal está no modo normal antes de ler o comprimento de onda.
+        xSemaphoreGive(g_command_mutex);
+    } else { return ESP_FAIL; }
+    
+    if (xSemaphoreTake(g_command_mutex, portMAX_DELAY) == pdTRUE) {
         ret = sercalo_get_set_wavelength(&channel->device_handle, NULL, &current_lambda);
         xSemaphoreGive(g_command_mutex);
     } else { return ESP_FAIL; }
@@ -330,6 +379,11 @@ esp_err_t handle_set_wl(char *args, char *response_buf, size_t response_buf_len)
 
     filter_channel_t *channel = select_filter_channel(band_str[0]);
     if (!channel) return ESP_ERR_INVALID_ARG;
+
+    if (xSemaphoreTake(g_command_mutex, portMAX_DELAY) == pdTRUE) {
+        ensure_power_on(channel); // Garante que o canal está no modo normal antes de ler o comprimento de onda.
+        xSemaphoreGive(g_command_mutex);
+    } else { return ESP_FAIL; }
     
     float target_wl = atof(wl_str);
     if (target_wl <= 0) return ESP_ERR_INVALID_ARG;
@@ -402,6 +456,82 @@ esp_err_t handle_sweep(char *args, char *response_buf, size_t response_buf_len) 
         return ESP_FAIL;
     }
     
+    return ESP_OK;
+}
+
+/**
+ * @brief Handler para o comando `powerup`.
+ *
+ * Liga os dispositivos
+ *
+ * @param args Não utilizado neste comando.
+ * @param response_buf Buffer para onde a string de resposta formatada será escrita.
+ * @param response_buf_len Tamanho total do buffer de resposta.
+ *
+ * @return ESP_OK Sempre retorna sucesso, mesmo que a leitura de um dos canais falhe
+ * (nesse caso, uma mensagem de falha é incluída na própria resposta).
+ *
+ */
+esp_err_t handle_powerup(char *args, char *response_buf, size_t response_buf_len) {
+    char temp_buf[RESPONSE_DATA_BUFFER_SIZE / 2];
+    response_buf[0] = '\0'; // Assegura que o buffer de resposta está vazio.
+
+    for (int i = 0; i < 2; i++) { // Itera sobre os dois canais
+        filter_channel_t *channel = &g_filter_channels[i];
+        sercalo_power_mode_t powerup = SERCALO_POWER_NORMAL; // Define o modo de energia para "ligado" (1)
+        esp_err_t ret;
+        
+        if (xSemaphoreTake(g_command_mutex, portMAX_DELAY) == pdTRUE) {
+            ret = sercalo_get_set_power_mode(&channel->device_handle, &powerup, NULL);
+            xSemaphoreGive(g_command_mutex);
+
+            if (ret == ESP_OK) {
+                snprintf(temp_buf, sizeof(temp_buf), "Canal %s: Ligado ", channel->name);
+            } else {
+                snprintf(temp_buf, sizeof(temp_buf), "Canal %s: Falha ao ligar | ", channel->name);
+            }
+            // Concatena a resposta do canal no buffer final, com segurança.
+            strncat(response_buf, temp_buf, response_buf_len - strlen(response_buf) - 1);
+        }
+    }
+    return ESP_OK;
+}
+
+/**
+ * @brief Handler para o comando `get_power`.
+ *
+ * Ver estado dos dispositivos
+ *
+ * @param args Não utilizado neste comando.
+ * @param response_buf Buffer para onde a string de resposta formatada será escrita.
+ * @param response_buf_len Tamanho total do buffer de resposta.
+ *
+ * @return ESP_OK Sempre retorna sucesso, mesmo que a leitura de um dos canais falhe
+ * (nesse caso, uma mensagem de falha é incluída na própria resposta).
+ *
+ */
+esp_err_t handle_get_power(char *args, char *response_buf, size_t response_buf_len) {
+    char temp_buf[RESPONSE_DATA_BUFFER_SIZE / 2];
+    response_buf[0] = '\0'; // Assegura que o buffer de resposta está vazio.
+
+    for (int i = 0; i < 2; i++) { // Itera sobre os dois canais
+        filter_channel_t *channel = &g_filter_channels[i];
+        sercalo_power_mode_t state;
+        esp_err_t ret;
+        
+        if (xSemaphoreTake(g_command_mutex, portMAX_DELAY) == pdTRUE) {
+            ret = sercalo_get_set_power_mode(&channel->device_handle, NULL, &state);
+            xSemaphoreGive(g_command_mutex);
+
+            if (ret == ESP_OK) {
+                snprintf(temp_buf, sizeof(temp_buf), "Canal %s: %i ", channel->name, state);
+            } else {
+                snprintf(temp_buf, sizeof(temp_buf), "Canal %s: Falha ao ler | ", channel->name);
+            }
+            // Concatena a resposta do canal no buffer final, com segurança.
+            strncat(response_buf, temp_buf, response_buf_len - strlen(response_buf) - 1);
+        }
+    }
     return ESP_OK;
 }
 
@@ -572,12 +702,6 @@ void app_main(void) {
     g_filter_channels[1].sweep_task_handle = NULL;
     ESP_ERROR_CHECK(sercalo_i2c_init_device(&g_filter_channels[1].device_handle, I2C_MASTER_NUM, L_BAND_FILTER_ADDR));
     ESP_LOGI(TAG, "Filtro Banda L inicializado no endereço 0x%02X.", L_BAND_FILTER_ADDR);
-
-    // Coloca ambos os filtros em modo de operação normal para garantir que estejam prontos.
-    sercalo_power_mode_t power_mode = SERCALO_POWER_NORMAL;
-    sercalo_get_set_power_mode(&g_filter_channels[0].device_handle, &power_mode, NULL);
-    sercalo_get_set_power_mode(&g_filter_channels[1].device_handle, &power_mode, NULL);
-    ESP_LOGI(TAG, "Filtros ativados (modo de energia NORMAL).");
 
     // Cria o mutex para proteger o acesso ao I2C.
     g_command_mutex = xSemaphoreCreateMutex();

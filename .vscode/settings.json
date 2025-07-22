@@ -3,5 +3,10 @@
     "idf.portWin": "COM6",
     "idf.espIdfPathWin": "C:\\Users\\felip\\esp\\v5.4.1\\esp-idf",
     "idf.toolsPathWin": "C:\\Users\\felip\\.espressif",
-    "idf.pythonInstallPath": "C:\\Users\\felip\\.espressif\\tools\\idf-python\\3.11.2\\python.exe"
+    "idf.pythonInstallPath": "C:\\Users\\felip\\.espressif\\tools\\idf-python\\3.11.2\\python.exe",
+    "C_Cpp.errorSquiggles": "disabled",
+    "files.associations": {
+        "sercalo_i2c.h": "c",
+        "cstdlib": "c"
+    }
 }
